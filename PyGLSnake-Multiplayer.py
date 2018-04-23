@@ -7,6 +7,8 @@ from OpenGL.WGL.EXT import swap_control
 from math import floor
 import sys
 from snake_logic import Snake
+from network import ClientMode, ServerMode, ServerClientConnection
+
 
 WINDOW_SIZE = (500,500)
 GRID_SIDE_SIZE_PX = 25
@@ -137,6 +139,16 @@ def main():
     #I didnt really want to use GLUT much but eh, I will work this out with standard libraries  later
     glutSpecialFunc(snake.keypress_callback_GLUT)
     
+    ##################################################
+    # LOAD NETWORK OPTIONS INI OR RUN AS SERVER HERE #
+    ##################################################
+    network = "pass"
+    #Create our quit socket here or something. We have to have a way to shutdown all different network classes at once, the same way
+    #
+    
+    # MAKE SURE TO EXIT IF NETWORK RETURNS FALSE
+    if network is False:
+        exit(1)
     
     renderman = RenderManager(Game_Grid, snake)
     glutDisplayFunc(renderman.render_all_shapes)

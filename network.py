@@ -27,9 +27,10 @@ from sys import exit as sys_exit
 
 
 class ClientMode(threading.Thread):
-    def __init__(self, renderman_instance, quit_socket, server_ip):
+    def __init__(self, renderman_instance, quit_socket, server_ip, server_port):
         self.renderman_instance = renderman_instance
         self.server_ip = server_ip
+        self.server_port = server_port
         self.quit_socket = quit_socket
         self.main_socket = None
         super(ClientMode, self).__init__()
@@ -40,10 +41,13 @@ class ClientMode(threading.Thread):
         try:
             #Using streaming TCP sockets. UDP is overkill for what we are doing.
             self.main_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            self.main_socket.connect((self.server_ip, self.server_port))
             
         except:
             print "Error connecting to server at ip %s, exiting..." % self.server_ip
-            sys_exit()
+            #sys_exit(1) #This does NOT seem to kill the whole app. We got some 'splainin to do.
+            #exit(1)
+            raise(Exception("DA FAQ"))
         
         #Ok we have a good connection to the server. Lets listen for any data
         while self.quitting == False:
@@ -108,39 +112,40 @@ class ClientMode(threading.Thread):
             self.main_socket.close()
         except:
             pass
-        
-        
-        
-        
+
 class ServerMode(threading.Thread):
-    def __init__(self, renderman_instance, quit_socket):
+    def __init__(self, renderman_instance, quit_socket, server_ip, server_port):
         self.renderman_instance = renderman_instance
-        super(ClientMode, self).__init__()
-        
-        
+        super(ServerMode, self).__init__()
+        print "SERVER MODE INIT - nothing really happening tho. Settings:"
+        print server_ip
+        print server_port
+
 class ServerClientConnection(threading.Thread):
     def __init__(self):
         super(ClientMode, self).__init__()
-        
+
 #Just a simple class to manage the client or server modes. Makes managing the connection from the main thread less dependent on the exact mode
-class MasterServerMode(object):
-    #Mode should be either ServerMode or ClientMode
+class MasterNetworkMode(object):
     #Mode_data should be a dictionary where each key is a variable name for the associated mode.
-    def __init__(self, renderman_instance, mode, mode_data):
-        self.quit_socket = socket.socket(socket.SOCK_INET, socket.SOCK_STREAM)
+    def __init__(self, renderman_instance, mode_data):
+        #Again, using sockets to communicate between threads here because the
+        #windows select() function can only handle sockets. Lame brah.
+        self.quit_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         self.quit_socket.bind(("127.0.0.1", 0))
-        self.shutdown_port = self.shutdown_socket.getsockname()[1] #Need the port number to call back later
+        self.shutdown_port = self.quit_socket.getsockname()[1] #Need the port number to call back later
         self.renderman_instance = renderman_instance
         self.thread_instance = None
-        self.netmode = mode
+        self.netmode = mode_data["net_mode"]
         self.mode_data = mode_data
-        self.mode_data["renderman_instance"] = renderman_instance
-        self.mode_data["quit_socket"] = self.quit_socket
         
         
     def startNetwork(self):
         if self.thread_instance is None:
-            self.thread_instance = self.netmode(**self.mode_data)
+            if self.netmode == "ClientMode":
+                self.thread_instance = ClientMode(self.renderman_instance, self.quit_socket, self.mode_data["ip"], self.mode_data["port"])
+            elif self.netmode == "ServerMode":
+                self.thread_instance = ServerMode(self.renderman_instance, self.quit_socket, self.mode_data["ip"], self.mode_data["port"])
             self.thread_instance.start()
         else:
             print "Networking thread is already running."

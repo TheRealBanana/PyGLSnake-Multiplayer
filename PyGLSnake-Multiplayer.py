@@ -130,7 +130,7 @@ def glinit():
     glutInitDisplayMode(GLUT_DOUBLE|GLUT_RGB)
     glutInitWindowSize(*WINDOW_SIZE)
     glutInitWindowPosition(50,50)
-    glutCreateWindow("PyGLSnake")
+    glutCreateWindow("PyGLSnake-Multiplayer")
     glClearColor(*(ELEMENT_TYPES[0]+[255])) #All our colors are 3-ints, this one needs alpha channel too so we just tack it on
     gluOrtho2D(0, WINDOW_SIZE[0], WINDOW_SIZE[1], 0)
 

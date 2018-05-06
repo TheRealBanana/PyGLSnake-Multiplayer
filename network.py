@@ -32,14 +32,35 @@ from sys import exit as sys_exit
 
 
 
-#This will be moved to the settings file later
-MAX_PLAYERS = 3
+#These will be moved to the settings file later
+#Number of players in the game
+MAX_PLAYERS = 2
+#Number of seconds to wait after all players have joined before the game begins
+GAME_START_WAIT = 10
+
+WINDOW_SIZE = (500,500)
+GRID_SIDE_SIZE_PX = 25
+TICKRATE_MS = 200
+MATH_PRECISION = 5
+
+rows = (WINDOW_SIZE[0]/GRID_SIDE_SIZE_PX)-1
+cols = (WINDOW_SIZE[1]/GRID_SIDE_SIZE_PX)-1
+
+#Spawn point data
+SPAWN_POINTS = []
+SPAWN_POINTS.append([(0,0), "right"])          # Top left
+SPAWN_POINTS.append([(rows, cols), "left"])    # Bottom right
+SPAWN_POINTS.append([(0, cols), "right"])      # Bottom left
+SPAWN_POINTS.append([(rows ,0), "left"])       # top right
+SPAWN_POINTS.append([(0, cols/2), "right"])    # Middle left
+SPAWN_POINTS.append([(rows, cols/2), "left"])  # Middle right
+SPAWN_POINTS.append([(rows/2, 0), "right"])    # Middle Top
+SPAWN_POINTS.append([(rows/2, cols), "right"]) # Middle Bottom
 
 #Was planning on using queues to communicate between threads but the
 #windows select() function can only handle sockets. Lame brah.
 class ClientMode(threading.Thread):
-    def __init__(self, renderman_instance, server_ip, server_port):
-        self.renderman_instance = renderman_instance
+    def __init__(self, server_ip, server_port):
         self.server_ip = server_ip
         self.server_port = int(server_port)
         self.quit_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -101,7 +122,7 @@ class ClientMode(threading.Thread):
             print "\nCommand processing error, couldn't load pickel data."
             #sys_exit()
             return
-        print "\n%s - %s:RECEIVED VALID COMMAND: %s" % (time.time(), self.name, data[0])
+        #print "\n%s - %s:RECEIVED VALID COMMAND: %s" % (time.time(), self.name, data[0])
         if data[0] == "GET_NEXT_MOVE":
             #Snake reference here, have to change the entire way snake ticks and works tho. Lame.
             pass
@@ -114,9 +135,23 @@ class ClientMode(threading.Thread):
         elif data[0] == "GAME_OVER":
             #All players are dead, game over man. Game over.
             pass
+        elif data[0] == "SERVER_MESSAGE":
+            print "SERVER_MESSAGE: %s" % data[1]
+        
+        elif data[0] == "GAME_MODE_DATA":
+            print "GOT GAME MODE DATA"
+            print data[1]
+            #Here we get data on screen size, grid size, and tickrate. We use this data to start up our GL game.
+        
+        #Unique player data. Spawn point and start direction.
+        elif data[0] == "INIT_PLAYER_DATA":
+            print "GOT INIT PLAYER DATA:"
+            print data[1]
+        
         elif data[0] == "DISCON":
             #Our server initiated the disconnection, so lets close up shop.
             self.quit_thread()
+        
         elif data[0] == "":
             pass
     
@@ -131,9 +166,28 @@ class ClientMode(threading.Thread):
         except:
             pass
 
+
+class SnakePlayer(object):
+    def __init__(self, connection_id, start_grid, start_direction):
+        self.id = connection_id
+        self.alive = False
+        self.current_grid = start_grid
+        self.direction = start_direction
+
+class GameServer(object):
+    def __init__(self, players=[]):
+        #Should be a list of SnakePlayer objects
+        self.players = players
+        
+    #Returns a list of players and their current positions/direction
+    #This data can be directly sent to clients accompanying the GAME_UPDATE command
+    def get_game_update(self):
+        
+        pass
+
+
 class ServerMode(threading.Thread):
-    def __init__(self, renderman_instance, server_ip, server_port):
-        self.renderman_instance = renderman_instance
+    def __init__(self, server_ip, server_port):
         self.quit_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         self.quit_socket.bind(("127.0.0.1", 0))
         self.quit_port = self.quit_socket.getsockname()[1]
@@ -152,9 +206,9 @@ class ServerMode(threading.Thread):
             
         super(ServerMode, self).__init__()
         print "SERVER MODE INIT - Settings:"
-        print server_ip
-        print server_port
-        print self.quit_port
+        print "IP: %s" % server_ip
+        print "Port: %s" % server_port
+        print "Quit_Port: %s" % self.quit_port
         
     
     def stop_client_threads(self):
@@ -179,7 +233,7 @@ class ServerMode(threading.Thread):
         #THIS ISNT WORKING
         #self.connections[connection_id].join()
         #del(self.connections[connection_id])
-        pass
+        print "Connection %s closed" % connection_id
     
     
     def send_command(self, command, client_idx):
@@ -201,10 +255,47 @@ class ServerMode(threading.Thread):
     
     #And this is where everything gets really damn complicated Im sure
     def start_game(self):
+        #Lets send our clients the game-mode data before anything else
+        game_mode_data = [WINDOW_SIZE, GRID_SIDE_SIZE_PX, TICKRATE_MS, MATH_PRECISION]
+        self.broadcast_command(["GAME_MODE_DATA", game_mode_data])
+        
+        players = []
+        for index, connection_id in enumerate(self.connections.keys()):
+            new_player = SnakePlayer(connection_id, SPAWN_POINTS[index][0], SPAWN_POINTS[index][1])
+            players.append(new_player)
+            #Tell the player their spawn point
+            init_player_data_command = ["INIT_PLAYER_DATA", (SPAWN_POINTS[index][0], SPAWN_POINTS[index][1])]
+            self.send_command(init_player_data_command, connection_id)
+        
+        gameserver = GameServer(players)
+        
         #Lets just send everyone a hello and tell them to get lost
-        while self.quitting is False:
-            self.broadcast_command(["GET_NEXT_MOVE"])
-            time.sleep(1)
+        game_over = False
+        game_init_start = True
+        countdown = GAME_START_WAIT
+        while self.quitting is False and game_over is False:
+            #Initial countdown
+            if game_init_start is True:
+                print "STARTING GAME IN %s SECONDS..." % countdown
+                if countdown == 0:
+                    #GET IT ON!
+                    game_init_start = False
+                    #Make them all alive
+                    for p in gameserver.players:
+                        p.alive = True
+                    self.broadcast_command(["SERVER_MESSAGE", "GAME STARTING!"])
+                else:
+                    #print "BCAST"
+                    self.broadcast_command(["SERVER_MESSAGE", "GAME STARTING IN %s SECONDS..." % countdown])
+                    countdown -= 1
+                time.sleep(1)
+                    
+            
+            #Now we're actually playing the game
+            else:
+                self.broadcast_command(["GET_NEXT_MOVE"])
+                time.sleep(1)
+                
         self.quitting = True
         return True
         
@@ -231,6 +322,18 @@ class ServerMode(threading.Thread):
                 return True
             continue
     
+    def network_cleanup(self):
+        #make sure everything has shut down
+        self.stop_client_threads()
+        try:
+            self.main_socket.close()
+        except:
+            pass
+        try:
+            self.quit_socket.close()
+        except:
+            pass
+    
     def run(self):
         self.quit_socket.listen(1)
         #Set up our listening socket
@@ -252,22 +355,10 @@ class ServerMode(threading.Thread):
         while self.quitting is False and len(self.connections) < MAX_PLAYERS:
             self.get_connection()
         if self.quitting is False:
-            print "All players are connected! Starting game in %s seconds..." % 10 # REPLACEME LATER WITH VAR
+            print "All players are connected! Starting game in %s seconds..." % GAME_START_WAIT
             self.start_game()
         
-        #make sure everything has shut down
-        self.stop_client_threads()
-        try:
-            self.main_socket.close()
-        except:
-            pass
-        try:
-            self.quit_socket.close()
-        except:
-            pass
-        
-        return
-        
+        self.network_cleanup()
     
 
 class ServerClientConnection(threading.Thread):
@@ -311,35 +402,57 @@ class ServerClientConnection(threading.Thread):
 #Just a simple class to manage the client or server modes. Makes managing the connection from the main thread less dependent on the exact mode
 class MasterNetworkMode(object):
     #Mode_data should be a dictionary where each key is a variable name for the associated mode.
-    def __init__(self, renderman_instance, mode_data):
-        self.renderman_instance = renderman_instance
-        self.thread_instance = None
+    def __init__(self, mode_data):
         self.netmode = mode_data["net_mode"]
         self.mode_data = mode_data
+        self.client_thread = None
+        self.server_thread = None
         
+    
+    
+    #The idea here is that regardless of whether we are running ClientMode or ServerMode, we are always running a game instance as well
+    #Even in ServerMode, however, we still run a ClientMode connected locally to the ServerMode.
+    def game_tick(self):
+        #print "TICK TOCK MOTHERFUCKER"
         
+        pass
+    
+    
     def startNetwork(self):
-        if self.thread_instance is None:
-            if self.netmode == "ClientMode":
-                self.thread_instance = ClientMode(self.renderman_instance, self.mode_data["ip"], self.mode_data["port"])
-            elif self.netmode == "ServerMode":
-                self.thread_instance = ServerMode(self.renderman_instance, self.mode_data["ip"], self.mode_data["port"])
-            self.thread_instance.start()
-        else:
-            print "Networking thread is already running."
+        #Should we run a server?
+        if self.netmode == "ServerMode":
+            if self.server_thread is None:
+                self.server_thread = ServerMode(self.mode_data["ip"], self.mode_data["port"])
+                self.server_thread.start()
+                #Modify our IP if we are running a server so our client thread connects correctly
+                self.mode_data["ip"] = "127.0.0.1"
+        
+        if self.client_thread is None:
+                self.client_thread = ClientMode(self.mode_data["ip"], self.mode_data["port"])
+                self.client_thread.start()
+        
     
     def stopNetwork(self):
-        if self.thread_instance is not None:
-            if self.thread_instance.is_alive() is True:
-                shutdown_socket_sender = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-                try:
-                    shutdown_socket_sender.connect(("127.0.0.1", self.thread_instance.quit_port))
-                    shutdown_socket_sender.close()
-                except:
-                    pass
-            else:
-                self.thread_instance = None
+        close_network_helper(self.client_thread)
+        if self.netmode == "ServerMode":
+            close_network_helper(self.server_thread)
+    
+
+def close_network_helper(network_thread):
+    if network_thread is not None:
+        if network_thread.is_alive() is True:
+            shutdown_socket_sender = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            try:
+                shutdown_socket_sender.connect(("127.0.0.1", network_thread.quit_port))
+                shutdown_socket_sender.close()
+            except:
+                pass
         else:
-            print "Networking thread is not currently running."
-    
-    
+            #This was probably already run once but we need to make sure
+            #Its possible the thread died and never cleaned itself up
+            network_thread.network_cleanup()
+            network_thread.join()
+            network_thread = None
+    else:
+        print "%s: Networking thread is not currently running." % repr(network_thread)
+

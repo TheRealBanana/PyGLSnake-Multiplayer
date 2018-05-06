@@ -104,14 +104,17 @@ class GridElement(object):
 
 
 class RenderManager(object):
-    def __init__(self, grid_instance, snake_instance):
+    def __init__(self, grid_instance, snake_instance, network_instance):
         super(RenderManager, self).__init__()
         self.grid_instance = grid_instance
         self.snake_instance = snake_instance
+        self.network_instance = network_instance
     
     def calc_movement_all_shapes(self, _):
         #Snake logic, best logic
-        self.snake_instance.game_tick()
+        
+        self.network_instance.game_tick()
+        #self.snake_instance.game_tick()
         
         #Reset our timer
         glutTimerFunc(TICKRATE_MS, self.calc_movement_all_shapes, 0)
@@ -174,10 +177,12 @@ def main():
     #Game related stuffs
     Game_Grid = Grid()
     snake = Snake(Game_Grid)
-    #class to handle the drawing of our various elements
-    renderman = RenderManager(Game_Grid, snake)
     game_settings = load_settings()
-    network = MasterNetworkMode(renderman, game_settings)
+    network = MasterNetworkMode(game_settings)
+    #class to handle the drawing of our various elements
+    #This has turned into more of a driver class for everything.
+    renderman = RenderManager(Game_Grid, snake, network)
+    
     #Start up the network side
     network.startNetwork()
     

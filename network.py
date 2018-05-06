@@ -152,7 +152,28 @@ class ClientMode(threading.Thread):
             #Our server initiated the disconnection, so lets close up shop.
             self.quit_thread()
         
+        elif data[0] == "TEST":
+            print "GOT TEST COMMAND, REPLYING..."
+            #Send back reply
+            self.send_reply("%s - CLIENT ID %s REPORTING IN" % (time.time(), self.name))
+        
         elif data[0] == "":
+            pass
+    
+    def send_reply(self, reply_data):
+        p_reply_data = cPickle.dumps(reply_data)
+        self.main_socket.send(p_reply_data)
+    
+    
+    def network_cleanup(self):
+        #make sure everything has shut down
+        try:
+            self.main_socket.close()
+        except:
+            pass
+        try:
+            self.quit_socket.close()
+        except:
             pass
     
     def quit_thread(self):
@@ -161,10 +182,8 @@ class ClientMode(threading.Thread):
             self.main_socket.send("DISCON")
         except:
             pass
-        try:
-            self.main_socket.close()
-        except:
-            pass
+        
+        self.network_cleanup()
 
 
 class SnakePlayer(object):
@@ -182,7 +201,8 @@ class GameServer(object):
     #Returns a list of players and their current positions/direction
     #This data can be directly sent to clients accompanying the GAME_UPDATE command
     def get_game_update(self):
-        
+        #We should only send back new data. If the update we got from the client is the same data
+        #we got the last update, dont send it out.
         pass
 
 
@@ -217,12 +237,8 @@ class ServerMode(threading.Thread):
             thread_idx_to_pop = []
             current_connections = self.connections.keys()
             for index in current_connections:
-                cli_thread = self.connections[index]
-                if cli_thread.is_alive() is False:
-                    cli_thread.join()
-                    thread_idx_to_pop.append(index)
-                else:
-                    cli_thread.quit_thread()
+                self.connections[index].quit_thread()
+                thread_idx_to_pop.append(index)
             if len(thread_idx_to_pop) > 0:
                 for i in thread_idx_to_pop:
                     del(self.connections[i])
@@ -236,19 +252,19 @@ class ServerMode(threading.Thread):
         print "Connection %s closed" % connection_id
     
     
-    def send_command(self, command, client_idx):
+    def send_command(self, command, client_idx, recv=False):
         command = cPickle.dumps(command)
-        if self.connections[client_idx].is_alive() is True:
-            self.connections[client_idx].send_command(command)
+        if self.connections[client_idx] is not None:
+            self.connections[client_idx].send_command(command, recv)
         else:
             del(self.connections[client_idx])
     
-    def broadcast_command(self, command):
+    def broadcast_command(self, command, recv=False):
         command = cPickle.dumps(command)
         current_clients = self.connections.keys()
         for client_idx in current_clients:
-            if self.connections[client_idx].is_alive() is True:
-                self.connections[client_idx].send_command(command)
+            if self.connections[client_idx] is not None:
+                self.connections[client_idx].send_command(command, recv)
             else:
                 del(self.connections[client_idx])
     
@@ -293,13 +309,17 @@ class ServerMode(threading.Thread):
             
             #Now we're actually playing the game
             else:
-                self.broadcast_command(["GET_NEXT_MOVE"])
+                print "Sending test command..."
+                self.broadcast_command(["TEST"], recv=True)
                 time.sleep(1)
                 
         self.quitting = True
         return True
         
-    
+    def check_connections(self):
+        #Periodically check the status of our connection threads and deal with any dropped clients
+        #Will probably just set their SnakePlayer.alive to False and let the clients handle it.
+        pass
     
     def get_connection(self):  
         print "Waiting for players... Currently %s/%s" % (len(self.connections), MAX_PLAYERS)
@@ -310,10 +330,9 @@ class ServerMode(threading.Thread):
                 connection, addy = sock.accept()
                 connection.setblocking(1)
                 #Create new thread to handle connection
-                connection_thread = ServerClientConnection(connection, self.close_connection_callback, self.nextidx)
-                connection_thread.start()
+                new_connection = ServerClientConnection(connection, self.close_connection_callback, self.nextidx)
                 #Add our connection_thread to our connection tracker
-                self.connections[self.nextidx] = connection_thread
+                self.connections[self.nextidx] = new_connection
                 self.nextidx += 1
             elif sock == self.quit_socket:
                 self.quit_socket.accept()
@@ -361,25 +380,30 @@ class ServerMode(threading.Thread):
         self.network_cleanup()
     
 
-class ServerClientConnection(threading.Thread):
+class ServerClientConnection(object):
     def __init__(self, client_socket, close_connection_callback, connection_id):
         self.client_socket = client_socket
         self.close_connection_callback = close_connection_callback
         self.connection_id = connection_id
         self.quitting = False
-        super(ServerClientConnection, self).__init__()
+        #super(ServerClientConnection, self).__init__()
         
     def quit_thread(self):
         self.quitting = True
         self.client_socket.close()
         self.close_connection_callback(self.connection_id)
         
-    def send_command(self, command):
+    def send_command(self, command, recv=False):
         try:
             #Depending on the command, we may want to wait for data as well
             self.client_socket.send(command)
-            if command == "":
-                self.receive_data()
+            if recv is True:
+                d = self.receive_data()
+                if d is not None:
+                    d = cPickle.loads(d)
+                    print "SCC_DBG %s RETURN DATA: %s" % (self.connection_id, str(d))
+                else:
+                    print "SCC_DBG: Didnt get expected return data. Ruh Roh."
         except Exception as e:
             print "\nSCC_DEBUG: Something went terribly wrong here, Exception was:"
             print e
@@ -387,16 +411,19 @@ class ServerClientConnection(threading.Thread):
     def receive_data(self):
         data = None
         try:
-            readable, _, _ = select.select([self.client_socket], [], [], 60)
+            readable, _, _ = select.select([self.client_socket], [], [], 1) #Very low timeout, we should get data right away
             for sock in readable:
-                data = self.sock.recv(4096)
-                return data
+                data = sock.recv(4096)
+                if data is not None and len(data) > 0:
+                    return data
+                elif len(data) == 0:
+                    print "SCC_DBG: Connection error, quitting..."
+                    self.quit_thread()
+                else:
+                    return None
         except:
             self.quit_thread()
         
-    def run(self):
-        while self.quitting is False:
-            self.receive_data()
 
 
 #Just a simple class to manage the client or server modes. Makes managing the connection from the main thread less dependent on the exact mode

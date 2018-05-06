@@ -65,26 +65,19 @@ class ClientMode(threading.Thread):
         
         #Ok we have a good connection to the server. Lets listen for any data
         while self.quitting == False:
-            print "ONE"
             data = None
             try:
                 readable, _, _ = select.select([self.main_socket, self.quit_socket], [], [], 60) #60 second timeout
                 for sock in readable:
                     if sock == self.main_socket:
-                        print "FOUR"
                         data = self.main_socket.recv(8192)
-                        print "FUCK: (%s) : %s" % (len(data), data)
                         #Handle any commands we get
                         if len(data) == 0:
-                            print "ZERO LEN QUIT"
                             self.quit_thread()
                         elif data is not None and len(data) > 0:
-                            print "FIVE"
                             self.process_command(data)
-                        
                         continue
                     elif sock == self.quit_socket:
-                        print "QUIT SOCKET"
                         self.quit_socket.accept()
                         self.quit_socket.close()
                         self.quitting = True
@@ -92,8 +85,6 @@ class ClientMode(threading.Thread):
             except Exception as e:
                 print "CM DEBUG: %s" % str(e)
                 break
-            sleep(1)
-        print "NINE"
         #Got the message to quit or the thread died, either way lets quit
         self.quit_thread()
     

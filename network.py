@@ -98,10 +98,10 @@ class ClientMode(threading.Thread):
                 return
         except:
             #Major error, blow up
-            print "Command processing error, couldn't load pickel data."
+            print "\nCommand processing error, couldn't load pickel data."
             #sys_exit()
             return
-        print "RECEIVED VALID COMMAND: %s" % data[0]
+        print "\n%s - %s:RECEIVED VALID COMMAND: %s" % (time.time(), self.name, data[0])
         if data[0] == "GET_NEXT_MOVE":
             #Snake reference here, have to change the entire way snake ticks and works tho. Lame.
             pass
@@ -121,7 +121,7 @@ class ClientMode(threading.Thread):
             pass
     
     def quit_thread(self):
-        print "QUIT CALLED"
+        print "\nQUIT CALLED"
         try:
             self.main_socket.send("DISCON")
         except:
@@ -177,8 +177,9 @@ class ServerMode(threading.Thread):
     def close_connection_callback(self, connection_id):
         #Try to join the thread
         #THIS ISNT WORKING
-        self.connections[connection_id].join()
-        del(self.connections[connection_id])
+        #self.connections[connection_id].join()
+        #del(self.connections[connection_id])
+        pass
     
     
     def send_command(self, command, client_idx):
@@ -201,9 +202,9 @@ class ServerMode(threading.Thread):
     #And this is where everything gets really damn complicated Im sure
     def start_game(self):
         #Lets just send everyone a hello and tell them to get lost
-        self.broadcast_command("HELLO")
-        self.broadcast_command("DISCON")
-        print "Said hello, quitting..."
+        while self.quitting is False:
+            self.broadcast_command(["GET_NEXT_MOVE"])
+            time.sleep(1)
         self.quitting = True
         return True
         
@@ -224,7 +225,6 @@ class ServerMode(threading.Thread):
                 self.connections[self.nextidx] = connection_thread
                 self.nextidx += 1
             elif sock == self.quit_socket:
-                print "SHUTDOWN SOCKET"
                 self.quit_socket.accept()
                 self.quit_socket.close()
                 self.quitting = True
@@ -290,7 +290,7 @@ class ServerClientConnection(threading.Thread):
             if command == "":
                 self.receive_data()
         except Exception as e:
-            print "SCC_DEBUG: Something went terribly wrong here, Exception was:"
+            print "\nSCC_DEBUG: Something went terribly wrong here, Exception was:"
             print e
     
     def receive_data(self):
@@ -301,7 +301,6 @@ class ServerClientConnection(threading.Thread):
                 data = self.sock.recv(4096)
                 return data
         except:
-            print "SCC: Client connection error or something else went wrong."
             self.quit_thread()
         
     def run(self):

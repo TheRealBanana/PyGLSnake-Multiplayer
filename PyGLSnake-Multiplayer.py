@@ -17,8 +17,12 @@ from network import MasterNetworkMode
 #Must have before this will work properly, otherwise mismatched window size/grid size will cause major issues
 #Maybe we should even reference from the bottom right, to prevent overdraw on both the right AND bottom.
 
+
+
+#Defaults, these will either be overwritten with server-supplied values in ClientMode
+#or these will serve as the values other clients use when in ServerMode.
 WINDOW_SIZE = (500,500)
-GRID_SIDE_SIZE_PX = 25
+GRID_SIDE_SIZE_PX = 20
 TICKRATE_MS = 200
 MATH_PRECISION = 5
 
@@ -40,10 +44,10 @@ ELEMENT_TYPES.append([255, 0, 0]) # Type # 4; DEAD HEAD
 
 
 class Grid(object):
-    def __init__(self, grid_side_size_px=GRID_SIDE_SIZE_PX):
+    def __init__(self, grid_side_size_px=GRID_SIDE_SIZE_PX, window_size=WINDOW_SIZE):
         super(Grid, self).__init__()
-        self.rows = int(floor(WINDOW_SIZE[0]/GRID_SIDE_SIZE_PX))
-        self.cols = int(floor(WINDOW_SIZE[1]/GRID_SIDE_SIZE_PX))
+        self.rows = int(floor(window_size[0]/grid_side_size_px))
+        self.cols = int(floor(window_size[1]/grid_side_size_px))
         self.grid_side_size_px = grid_side_size_px
         self.active_grid_elements = {}
         
@@ -164,6 +168,16 @@ def load_settings():
     good = False
     if settings.has_key("net_mode") is True:
         if settings["net_mode"] == "ClientMode" or settings["net_mode"] == "ServerMode":
+            #Check for game mode params if we are server mode
+            if settings["net_mode"] == "ServerMode":
+                settings["game_params"] = {}
+                settings["game_params"]["WINDOW_SIZE"] = WINDOW_SIZE
+                settings["game_params"]["GRID_SIDE_SIZE_PX"] = GRID_SIDE_SIZE_PX
+                settings["game_params"]["TICKRATE_MS"] = TICKRATE_MS
+                settings["game_params"]["MATH_PRECISION"] = MATH_PRECISION
+            else:
+                settings["game_params"] = None
+            #Check both for ip and port
             if settings.has_key("ip") is True and settings.has_key("port") is True:
                 good = True
     if good is False:
@@ -172,19 +186,49 @@ def load_settings():
     return settings
 
 
-def main():
+
+
+def update_params(params):
+    global WINDOW_SIZE, GRID_SIDE_SIZE_PX, TICKRATE_MS, MATH_PRECISION
+    WINDOW_SIZE = params["WINDOW_SIZE"]
+    GRID_SIDE_SIZE_PX = params["GRID_SIDE_SIZE_PX"]
+    TICKRATE_MS = params["TICKRATE_MS"]
+    MATH_PRECISION = params["MATH_PRECISION"]
     
-    #Game related stuffs
-    Game_Grid = Grid()
-    snake = Snake(Game_Grid)
+def main():
+    #Load up the local settings
     game_settings = load_settings()
+    #Network starts first since it gives us many of the parameters we need to initialize our game grid.
     network = MasterNetworkMode(game_settings)
+    network.startNetwork()
+    
+    #This function will wait until the network thread either connects or times out
+    #This really shouldn't take more than a few hundred milliseconds at worst on a local connection
+    
+    game_grid_params = network.getParameters()
+    if game_grid_params is None: #YOU DUN GOOFED UP NOW
+        print "Failed to initialize network thread. Quitting..."
+        exit(1)
+    
+    
+    if game_settings["net_mode"] == "ClientMode":
+        print "Client recv params:"
+        print game_grid_params
+    #Update our globals and initilize our game grid and snake objects.
+    update_params(game_grid_params)
+    
+    print "PARAMS UPDATE TEST"
+    print GRID_SIDE_SIZE_PX
+    #Game related stuffs
+    Game_Grid = Grid(game_grid_params["GRID_SIDE_SIZE_PX"], game_grid_params["WINDOW_SIZE"])
+    snake = Snake(Game_Grid)
+    
     #class to handle the drawing of our various elements
     #This has turned into more of a driver class for everything.
+    
+    #retrieve our state info
     renderman = RenderManager(Game_Grid, snake, network)
     
-    #Start up the network side
-    network.startNetwork()
     
     #Gl/Glut stuffs below
     glinit()

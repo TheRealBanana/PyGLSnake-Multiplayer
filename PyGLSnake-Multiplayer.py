@@ -65,8 +65,8 @@ class Grid(object):
     
     def create_grid_element(self, element_type, grid_index_tuple):
         #Figure out the coords of the top-left corner
-        x_coord = self.grid_side_size_px * grid_index_tuple[0]
-        y_coord = self.grid_side_size_px * grid_index_tuple[1]
+        x_coord = self.grid_side_size_px * grid_index_tuple[0] + self.grid_side_size_px
+        y_coord = self.grid_side_size_px * grid_index_tuple[1] + self.grid_side_size_px
         new_grid_element = GridElement(self.grid_side_size_px, (x_coord, y_coord), element_type)
         self.active_grid_elements[grid_index_tuple] = new_grid_element
     
@@ -92,11 +92,11 @@ class GridElement(object):
         
     def get_vertices(self):
         return_vertices = {}
-        
-        return_vertices["tl"] = (self.origin_coords[0], self.origin_coords[1])
-        return_vertices["bl"] = (self.origin_coords[0], self.origin_coords[1]+self.size_px)
-        return_vertices["br"] = (self.origin_coords[0]+self.size_px, self.origin_coords[1]+self.size_px)
-        return_vertices["tr"] = (self.origin_coords[0]+self.size_px, self.origin_coords[1])
+        #Building from the bottom right corner.
+        return_vertices["br"] = (self.origin_coords[0], self.origin_coords[1])
+        return_vertices["tr"] = (self.origin_coords[0], self.origin_coords[1]-self.size_px)
+        return_vertices["tl"] = (self.origin_coords[0]-self.size_px, self.origin_coords[1]-self.size_px)
+        return_vertices["bl"] = (self.origin_coords[0]-self.size_px, self.origin_coords[1])
         
         return return_vertices
     
@@ -196,9 +196,6 @@ def load_settings():
 
 
 def update_params(params):
-    print "\n\nPARAMS:"
-    print params
-    print "\n\n"
     global WINDOW_SIZE, GRID_SIDE_SIZE_PX, TICKRATE_MS, MATH_PRECISION, INIT_SNAKE_SIZE
     WINDOW_SIZE = params["WINDOW_SIZE"]
     GRID_SIDE_SIZE_PX = params["GRID_SIDE_SIZE_PX"]
@@ -225,11 +222,10 @@ def main():
     if game_settings["net_mode"] == "ClientMode":
         print "Client recv params:"
         print game_grid_params
+        
     #Update our globals and initilize our game grid and snake objects.
     update_params(game_grid_params)
     
-    print "PARAMS UPDATE TEST"
-    print GRID_SIDE_SIZE_PX
     #Game related stuffs
     #Get our player init data from the client thread. This will block just like getParameters() did
     init_player_data = network.client_thread.getInitPlayerData()

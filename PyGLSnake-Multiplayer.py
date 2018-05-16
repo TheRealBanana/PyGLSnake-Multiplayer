@@ -25,6 +25,12 @@ WINDOW_SIZE = (500,500)
 GRID_SIDE_SIZE_PX = 20
 TICKRATE_MS = 200
 MATH_PRECISION = 5
+#maximum number of active objective blocks on the grid at one time
+MAX_ACTIVE_OBJS = 7
+#Delay between objectives being added to the grid, in ticks (i.e. number of snake moves between adding new objectives)
+OBJECTIVE_DELAY_TICKS = 10
+#Starting snake size
+INIT_SNAKE_SIZE = 5
 
 #Just makes things look nicer
 CORNER_ANGLES = {
@@ -175,6 +181,7 @@ def load_settings():
                 settings["game_params"]["GRID_SIDE_SIZE_PX"] = GRID_SIDE_SIZE_PX
                 settings["game_params"]["TICKRATE_MS"] = TICKRATE_MS
                 settings["game_params"]["MATH_PRECISION"] = MATH_PRECISION
+                settings["game_params"]["INIT_SNAKE_SIZE"] = INIT_SNAKE_SIZE
             else:
                 settings["game_params"] = None
             #Check both for ip and port
@@ -189,11 +196,15 @@ def load_settings():
 
 
 def update_params(params):
-    global WINDOW_SIZE, GRID_SIDE_SIZE_PX, TICKRATE_MS, MATH_PRECISION
+    print "\n\nPARAMS:"
+    print params
+    print "\n\n"
+    global WINDOW_SIZE, GRID_SIDE_SIZE_PX, TICKRATE_MS, MATH_PRECISION, INIT_SNAKE_SIZE
     WINDOW_SIZE = params["WINDOW_SIZE"]
     GRID_SIDE_SIZE_PX = params["GRID_SIDE_SIZE_PX"]
     TICKRATE_MS = params["TICKRATE_MS"]
     MATH_PRECISION = params["MATH_PRECISION"]
+    INIT_SNAKE_SIZE = params["INIT_SNAKE_SIZE"]
     
 def main():
     #Load up the local settings
@@ -220,13 +231,17 @@ def main():
     print "PARAMS UPDATE TEST"
     print GRID_SIDE_SIZE_PX
     #Game related stuffs
+    #Get our player init data from the client thread. This will block just like getParameters() did
+    init_player_data = network.client_thread.getInitPlayerData()
+    
     Game_Grid = Grid(game_grid_params["GRID_SIDE_SIZE_PX"], game_grid_params["WINDOW_SIZE"])
-    snake = Snake(Game_Grid)
+    snake = Snake(Game_Grid, init_player_data)
+    
+    #Update our network side with the snake reference
+    network.setSnakeReference(snake)
     
     #class to handle the drawing of our various elements
     #This has turned into more of a driver class for everything.
-    
-    #retrieve our state info
     renderman = RenderManager(Game_Grid, snake, network)
     
     

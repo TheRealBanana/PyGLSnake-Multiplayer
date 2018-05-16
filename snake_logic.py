@@ -1,29 +1,38 @@
 from random import randint
 
-#maximum number of active objective blocks on the grid at one time
-MAX_ACTIVE_OBJS = 7
-#Delay between objectives being added to the grid, in ticks (i.e. number of snake moves between adding new objectives)
-OBJECTIVE_DELAY_TICKS = 10
-#Starting snake size
-INIT_SNAKE_SIZE = 5
-
 
 class Snake(object):
-    def __init__(self, game_grid_instance):
+    def __init__(self, game_grid_instance, init_player_data):
         super(Snake, self).__init__()
         self.game_grid_instance = game_grid_instance
         self.tickno = 0
         #self.current_mode = self.test_mode_init #Test mode for now
         self.current_mode = self.snake_mode
-        self.current_grid = (9, 7)
-        self.direction = "None"
+        
+        
+        #These three will need to be set on instantiation
+        self.connection_id = init_player_data["connection_id"]
+        self.current_grid = init_player_data["start_grid"]
+        self.direction = init_player_data["direction"]
+        self.length = init_player_data["init_snake_size"]
+        
         self.snake_grids = [self.current_grid]
         self.game_grid_instance.create_grid_element(1, self.current_grid)
         self.objective_list = []
-        self.length = INIT_SNAKE_SIZE
+        
         self.alive = True
         self.gameover = False
         
+    
+    def get_snake_state(self):
+        return_state_data = {}
+        return_state_data["alive"] = self.alive
+        return_state_data["current_grid"] = self.current_grid
+        return_state_data["direction"] = self.direction
+        return_state_data["length"] = self.length
+        return_state_data["snake_grids"] = self.snake_dead
+        return return_state_data
+    
     def game_tick(self):
         if self.gameover is False:
             self.current_mode()
@@ -90,6 +99,8 @@ class Snake(object):
         #Hit ourself! X(
         elif next_move in self.snake_grids:
             self.alive = False
+            
+        #Hit other snake?? Ohshi-
             
         #good move
         else:

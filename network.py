@@ -53,6 +53,9 @@ class ClientMode(threading.Thread):
         self.is_connected = False
         self.quitting = False
         self.game_mode_params = None
+        self.init_player_data = None
+        self.snake_reference = None
+        self.connection_id = "NOT_CONNECTED"
         super(ClientMode, self).__init__()
         
     #Main part of our thread
@@ -135,8 +138,10 @@ class ClientMode(threading.Thread):
         
         #Unique player data. Spawn point and start direction.
         elif data[0] == "INIT_PLAYER_DATA":
-            print "GOT INIT PLAYER DATA:"
-            print data[1]
+            print "GOT INIT PLAYER DATA: % "
+            self.init_player_data = data[1]
+            self.init_player_data["init_snake_size"] = self.game_mode_params["INIT_SNAKE_SIZE"]
+            self.connection_id = self.init_player_data["connection_id"]
         
         elif data[0] == "DISCON":
             #Our server initiated the disconnection, so lets close up shop.
@@ -145,7 +150,7 @@ class ClientMode(threading.Thread):
         elif data[0] == "TEST":
             print "GOT TEST COMMAND, REPLYING..."
             #Send back reply
-            self.send_reply("%s - CLIENT ID %s REPORTING IN" % (time.time(), self.name))
+            self.send_reply("%s - CLIENT ID %s REPORTING IN" % (time.time(), self.connection_id))
         
         elif data[0] == "":
             pass
@@ -154,6 +159,11 @@ class ClientMode(threading.Thread):
         p_reply_data = cPickle.dumps(reply_data)
         self.main_socket.send(p_reply_data)
     
+    
+    def getInitPlayerData(self):
+        while self.init_player_data is None:
+            time.sleep(0.25) #I dont like using sleep here, theres probably a better way to do this with callbacks.
+        return self.init_player_data
     
     def network_cleanup(self):
         #make sure everything has shut down
@@ -184,7 +194,8 @@ class SnakePlayer(object):
         self.direction = start_direction
 
 class GameServer(object):
-    def __init__(self, players=[]):
+    def __init__(self, server_mode_ctx, players={}):
+        self.server_mode_ctx = server_mode_ctx
         #Should be a list of SnakePlayer objects
         self.players = players
         
@@ -194,7 +205,35 @@ class GameServer(object):
         #We should only send back new data. If the update we got from the client is the same data
         #we got the last update, dont send it out.
         pass
-
+    
+    
+    #This function assumes state_data contains all data required.
+    def set_player_state(self, connection_id, state_data):
+        self.players[connection_id].alive = state_data["alive"]
+        self.players[connection_id].current_grid = state_data["current_grid"]
+        self.players[connection_id].direction = state_data["direction"]
+    
+    
+    #We do things oddly here just to allow for updating only one item at a time if necessary
+    #i.e. just update the alive state without resetting position or direction
+    def update_player_state(self, connection_id, state_data):
+        #Only 3 possible values we can mess with, alive, current_grid, and direction.
+        if state_data.has_key("alive") is True:
+            self.players[connection_id].alive = state_data["alive"]
+            
+        if state_data.has_key("current_grid") is True and len(state_data["current_grid"]) > 0:
+            self.players[connection_id].current_grid = state_data["current_grid"]
+            
+        if state_data.has_key("direction") is True and len(state_data["direction"]) > 0:
+            self.players[connection_id].direction = state_data["direction"]
+            
+    def get_player_state(self, connection_id):
+        return_state_data = {}
+        return_state_data["alive"] = self.players[connection_id].alive
+        return_state_data["current_grid"] = self.players[connection_id].current_grid
+        return_state_data["direction"] = self.players[connection_id].direction
+        return return_state_data
+        
 
 class ServerMode(threading.Thread):
     def __init__(self, server_ip, server_port, game_mode_params):
@@ -206,6 +245,7 @@ class ServerMode(threading.Thread):
         self.server_ip = server_ip
         self.quitting = False
         self.game_mode_params = game_mode_params
+        self.gameserver = None
         #Eh might as well do this here
         rows = (self.game_mode_params["WINDOW_SIZE"][0]/self.game_mode_params["GRID_SIDE_SIZE_PX"])-1
         cols = (self.game_mode_params["WINDOW_SIZE"][1]/self.game_mode_params["GRID_SIDE_SIZE_PX"])-1
@@ -251,13 +291,17 @@ class ServerMode(threading.Thread):
         
             
     def close_connection_callback(self, connection_id):
-        #Try to join the thread
-        #THIS ISNT WORKING
-        #self.connections[connection_id].join()
-        #del(self.connections[connection_id])
         print "Connection %s closed" % connection_id
         self.connections[connection_id] = None
         del(self.connections[connection_id])
+        #Connection closed, set the associated player to being Dead
+        self.gameserver.update_player_state(connection_id, {"alive": False})
+    
+    
+    def data_update_callback(self, connection_id, recv_data):
+        print "GOT RECV DATA FROM CONNECTION ID: %s" % connection_id
+        print "DATA: "
+        print recv_data
     
     
     def send_command(self, command, client_idx, recv=False):
@@ -277,15 +321,23 @@ class ServerMode(threading.Thread):
         #Lets send our clients the game-mode data before anything else
         self.broadcast_command(["GAME_MODE_DATA", self.game_mode_params])
         
-        players = []
+        
+        #Set up the individual SnakePlayer objects for each of our connections
+        #Then pass that over to our GameServer object
+        #During the setup of each player we send out player-specific data to the client
+        players = {}
         for index, connection_id in enumerate(self.connections.keys()):
             new_player = SnakePlayer(connection_id, self.SPAWN_POINTS[index][0], self.SPAWN_POINTS[index][1])
-            players.append(new_player)
+            players[connection_id] = new_player
             #Tell the player their spawn point
-            init_player_data_command = ["INIT_PLAYER_DATA", (self.SPAWN_POINTS[index][0], self.SPAWN_POINTS[index][1])]
+            init_player_data = {}
+            init_player_data["start_grid"] = self.SPAWN_POINTS[index][0]
+            init_player_data["direction"] = self.SPAWN_POINTS[index][1]
+            init_player_data["connection_id"] = connection_id
+            init_player_data_command = ["INIT_PLAYER_DATA", init_player_data]
             self.send_command(init_player_data_command, connection_id)
         
-        gameserver = GameServer(players)
+        self.gameserver = GameServer(self, players)
         
         game_over = False
         game_init_start = True
@@ -298,7 +350,7 @@ class ServerMode(threading.Thread):
                     #GET IT ON!
                     game_init_start = False
                     #Make them all alive
-                    for p in gameserver.players:
+                    for _, p in self.gameserver.players.iteritems():
                         p.alive = True
                     self.broadcast_command(["SERVER_MESSAGE", "GAME STARTING!"])
                 else:
@@ -310,7 +362,7 @@ class ServerMode(threading.Thread):
             
             #Now we're actually playing the game
             else:
-                #Prune connections, if all clients have connected its game over
+                #Prune connections, if all clients have disconnected its game over
                 self.check_connections()
                 if len(self.connections) == 0:
                     print "All players disconnected, game over man!"
@@ -326,9 +378,13 @@ class ServerMode(threading.Thread):
         return True
         
     def check_connections(self):
-        #Periodically check the status of our connection threads and deal with any dropped clients
-        #Will probably just set their SnakePlayer.alive to False and let the clients handle it.
-        pass
+        bad_cons = []
+        for connection_id, connection in self.connections.iteritems():
+            if connection.quitting is True:
+                bad_cons.append(connection_id)
+        for connection_id in bad_cons:
+            del(self.connections[connection_id])
+            self.gameserver.update_player_state(connection_id, {"alive": False})
     
     def get_connection(self):  
         print "Waiting for players... Currently %s/%s" % (len(self.connections), MAX_PLAYERS)
@@ -339,7 +395,7 @@ class ServerMode(threading.Thread):
                 connection, addy = sock.accept()
                 connection.setblocking(1)
                 #Create new thread to handle connection
-                new_connection = ServerClientConnection(connection, self.close_connection_callback, self.nextidx)
+                new_connection = ServerClientConnection(connection, self.close_connection_callback, self.data_update_callback, self.nextidx)
                 #Add our connection_thread to our connection tracker
                 self.connections[self.nextidx] = new_connection
                 self.nextidx += 1
@@ -389,9 +445,10 @@ class ServerMode(threading.Thread):
     
 
 class ServerClientConnection(object):
-    def __init__(self, client_socket, close_connection_callback, connection_id):
+    def __init__(self, client_socket, close_connection_callback, data_update_callback, connection_id):
         self.client_socket = client_socket
         self.close_connection_callback = close_connection_callback
+        self.data_update_callback = data_update_callback
         self.connection_id = connection_id
         self.quitting = False
         #super(ServerClientConnection, self).__init__()
@@ -409,11 +466,12 @@ class ServerClientConnection(object):
                 d = self.receive_data()
                 if d is not None:
                     d = cPickle.loads(d)
-                    print "SCC_DBG %s RETURN DATA: %s" % (self.connection_id, str(d))
+                    #Tell the main thread we got some data for it
+                    self.data_update_callback(self.connection_id, d)
                 else:
                     print "SCC_DBG: Didnt get expected return data. Ruh Roh."
         except Exception as e:
-            if e.args[0] in [10054, 9]:
+            if e.args[0] in [10053, 10054, 9]:
                 print "\n[%s] SCC_DEBUG: Client connection closed, we're done." % self.connection_id
                 self.quit_thread()
             else:
@@ -497,6 +555,9 @@ class MasterNetworkMode(object):
                 return self.client_thread.game_mode_params
             else:
                 return None
+    
+    def setSnakeReference(self, snake_reference):
+        self.client_thread.snake_reference = snake_reference
     
 
 def close_network_helper(network_thread):

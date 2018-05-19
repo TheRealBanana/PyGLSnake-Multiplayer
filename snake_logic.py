@@ -1,24 +1,28 @@
 from random import randint
 
+class SnakeManager(object):
+    def __init__(self, init_player_data_all={}):
+        self.snakes = {}
+        for connection_id, init_player_data in init_player_data_all.iteritems():
+            newsnake = Snake(init_player_data)
+            self.snakes[connection_id] = newsnake
+        super(SnakeManager, self).__init__()
+        
 
 class Snake(object):
-    def __init__(self, game_grid_instance, init_player_data):
+    def __init__(self, init_player_data):
         super(Snake, self).__init__()
-        self.game_grid_instance = game_grid_instance
-        self.tickno = 0
-        #self.current_mode = self.test_mode_init #Test mode for now
-        self.current_mode = self.snake_mode
-        
         
         #These three will need to be set on instantiation
         self.connection_id = init_player_data["connection_id"]
         self.current_grid = init_player_data["start_grid"]
         self.direction = init_player_data["direction"]
         self.length = init_player_data["init_snake_size"]
+        self.color = init_player_data["color"]
         
         self.snake_grids = [self.current_grid]
         self.game_grid_instance.create_grid_element(1, self.current_grid)
-        self.objective_list = []
+        
         
         self.alive = True
         self.gameover = False
@@ -121,9 +125,7 @@ class Snake(object):
             self.current_grid = next_move
     
     
-    def getMove(self, direction=None):
-        if direction is None: direction = self.direction
-        
+    def getMove(self, direction):
         if direction == "down":
             next_grid = (self.current_grid[0], self.current_grid[1]+1)
             

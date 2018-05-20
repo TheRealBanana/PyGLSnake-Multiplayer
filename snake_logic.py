@@ -9,6 +9,13 @@ class SnakeManager(object):
             self.snakes[connection_id] = newsnake
         super(SnakeManager, self).__init__()
     
+    #Set a single variable for all players. For now it just sets them alive
+    #Might do more later, who knows.
+    def setAllPlayersVar(self, player_var, var_data):
+        for connection_id, snakeobj in self.snakes.iteritems():
+            if player_var == "alive":
+                snakeobj.alive = var_data
+    
     #Getting input from GLUT's special input func
     def keypressCallbackGLUT(self, keycode, _, __): #Last two args are the x and y coords but we dont care about them
         if keycode == 100: self.changeDirection("left")
@@ -39,7 +46,8 @@ class SnakeManager(object):
     #Just get our snake data
     def getOurSnakeData(self):
         #Get our next move based on our current direction
-        self.snakes[self.our_connection_id].setNextMove()
+        next_move = self.snakes[self.our_connection_id].getMove()
+        self.snakes[self.our_connection_id].setNextMove(next_move)
         return self.snakes[self.our_connection_id].getSnakeState()
 
 class Snake(object):
@@ -51,12 +59,12 @@ class Snake(object):
         self.length = init_player_data["init_snake_size"]
         self.color = init_player_data["color"]
         self.snake_grids = [self.current_grid]
-        self.alive = True
+        self.alive = False
     
     def setSnakeState(self, snake_state_data):
         self.alive = snake_state_data["alive"]
         self.current_grid = snake_state_data["current_grid"]
-        self.direction = snake_state_data["direction"]
+        #self.direction = snake_state_data["direction"]
         self.length = snake_state_data["length"]
         self.snake_grids = snake_state_data["snake_grids"]
     
@@ -73,8 +81,10 @@ class Snake(object):
     
     #Get the next move for our snake
     #This will not return any data, just update our current snake grids to include our new grid
-    def setNextMove(self):
-        direction=self.direction
+    def getMove(self, direction=None):
+        if direction is None:
+            direction = self.direction
+        
         if direction == "down":
             next_grid = (self.current_grid[0], self.current_grid[1]+1)
             
@@ -87,6 +97,9 @@ class Snake(object):
         elif direction == "left":
             next_grid = (self.current_grid[0]-1, self.current_grid[1])
         
+        return next_grid
+    
+    def setNextMove(self, next_grid):
         if len(self.snake_grids) >= self.length:
             del(self.snake_grids[0])
         self.snake_grids.append(next_grid)

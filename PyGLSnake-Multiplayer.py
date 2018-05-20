@@ -1,7 +1,7 @@
 
 from OpenGL.GL import glColor3ub, glVertex2i, glBegin, glEnd, glClearColor, GL_QUADS, glClear, GL_COLOR_BUFFER_BIT
 from OpenGL.GLU import gluOrtho2D
-from OpenGL.GLUT import glutTimerFunc, glutSpecialFunc, glutInit, glutInitDisplayMode, glutPostRedisplay, glutInitWindowSize, glutInitWindowPosition, glutSwapBuffers, glutCreateWindow, glutDisplayFunc, glutMainLoop, GLUT_DOUBLE, GLUT_RGB, glutSetOption, GLUT_ACTION_ON_WINDOW_CLOSE, GLUT_ACTION_CONTINUE_EXECUTION
+from OpenGL.GLUT import glutTimerFunc, glutPostRedisplay, glutSpecialFunc, glutInit, glutInitDisplayMode, glutInitWindowSize, glutInitWindowPosition, glutSwapBuffers, glutCreateWindow, glutDisplayFunc, glutMainLoop, GLUT_DOUBLE, GLUT_RGB, glutSetOption, GLUT_ACTION_ON_WINDOW_CLOSE, GLUT_ACTION_CONTINUE_EXECUTION
 #from time import sleep, time
 from math import floor
 import sys
@@ -55,8 +55,11 @@ class Grid(object):
         self.grid_side_size_px = grid_side_size_px
         self.snake_manager_reference = snake_manager_reference
         self.active_grid_elements = {}
-        self.objective_elements = {}
+        self.objective_grids = []
         
+    def setObjectiveData(self, objective_data):
+        self.objective_grids = objective_data
+    
     def getGridElement(self, grid_index_tuple):
         if self.active_grid_elements.has_key(grid_index_tuple):
             return self.active_grid_elements[grid_index_tuple]
@@ -109,8 +112,9 @@ class Grid(object):
             for grid in snake_data["snake_grids"]:
                 self.createGridElement(ELEMENT_TYPES[1], grid)
         
-        #Add our objectives to our active element list
-        self.active_grid_elements.update(self.objective_elements)
+        #Add objectives to our active element list
+        for grid in self.objective_grids:
+            self.createGridElement(ELEMENT_TYPES[3], grid)
     
 
 class GridElement(object):
@@ -144,16 +148,12 @@ class GridElement(object):
 
 
 class RenderManager(object):
-    def __init__(self, grid_instance, snake_instance, network_instance):
+    def __init__(self, grid_instance):
         super(RenderManager, self).__init__()
         self.grid_instance = grid_instance
-        self.snake_instance = snake_instance
-        self.network_instance = network_instance
     
     def calc_movement_all_shapes(self, _):
         #Snake logic, best logic
-        
-        self.network_instance.game_tick()
         #self.snake_instance.game_tick()
         
         #Reset our timer
@@ -269,12 +269,13 @@ def main():
     Game_Grid = Grid(snakepit, game_grid_params["GRID_SIDE_SIZE_PX"], game_grid_params["WINDOW_SIZE"])
     
     
-    #Update our network side with the SnakeManager reference
+    #Update our network side with the SnakeManager and Grid references
     network.setSnakeReference(snakepit)
+    network.setGridReference(Game_Grid)
     
     #class to handle the drawing of our various elements
     #This has turned into more of a driver class for everything.
-    renderman = RenderManager(Game_Grid, snakepit, network)
+    renderman = RenderManager(Game_Grid)
     
     
     #Gl/Glut stuffs below
@@ -282,8 +283,9 @@ def main():
     glutSpecialFunc(snakepit.keypressCallbackGLUT)
     #glutDisplayFunc is the main callback function opengl calls when GLUT determines that the display must be redrawn
     glutDisplayFunc(renderman.render_all_shapes)
-    #This timer will execute our function every TICKRATE_MS milliseconds, and in this function we call glutPostRedisplay to invoke the above callback.
+    
     glutTimerFunc(TICKRATE_MS, renderman.calc_movement_all_shapes, 0)
+    
     #Might want to get rid of this unless we plan to run it through the komodo profiler
     glutSetOption(GLUT_ACTION_ON_WINDOW_CLOSE, GLUT_ACTION_CONTINUE_EXECUTION)
     #Start everything up

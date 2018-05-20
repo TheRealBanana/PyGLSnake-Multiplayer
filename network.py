@@ -4,6 +4,7 @@ import threading
 import time
 import cPickle
 import Queue
+from copy import deepcopy
 from sys import exit as sys_exit
 
 #None of our exit methods work from inside here because of the way
@@ -63,9 +64,8 @@ class ClientMode(threading.Thread):
         self.quitting = False
         self.game_mode_params = None
         self.init_player_data = None
-        self.other_player_data = None
         self.snake_reference = None
-        self.connection_id = "NOT_CONNECTED"
+        self.connection_id = None
         super(ClientMode, self).__init__()
         
     #Main part of our thread
@@ -88,8 +88,8 @@ class ClientMode(threading.Thread):
         self.is_connected = True
         #Ok we have a good connection to the server. Lets listen for any data
         while self.quitting == False:
-            data = None
-            try:
+                data = None
+            #try:
                 readable, _, _ = select.select([self.main_socket, self.quit_socket], [], [], 60) #60 second timeout
                 for sock in readable:
                     if sock == self.main_socket:
@@ -105,9 +105,9 @@ class ClientMode(threading.Thread):
                         self.quit_socket.close()
                         self.quitting = True
                         break
-            except Exception as e:
-                print "CM DEBUG: %s" % str(e)
-                break
+            #except Exception as e:
+            #    print "CM DEBUG: %s" % str(e)
+            #    break
         #Got the message to quit or the thread died, either way lets quit
         self.quit_thread()
     
@@ -125,14 +125,13 @@ class ClientMode(threading.Thread):
             #sys_exit()
             return
         #print "\n%s - %s:RECEIVED VALID COMMAND: %s" % (time.time(), self.name, data[0])
+        
         if data[0] == "GET_NEXT_MOVE":
-            #Snake reference here, have to change the entire way snake ticks and works tho. Lame.
-            #nextmove = self.snake_reference.getMove() CHANGEME!!! THE GETMOVE FUNCTION IS NOT DESIGNED FOR THIS!!!!
-            pass
+            self.send_reply("PLAYER_DATA_UPDATE", self.snake_reference.getOurSnakeData())
         
         elif data[0] == "GAME_UPDATE":
-            #Got player position data for other clients 
-            pass
+            self.snake_reference.setAllSnakesData(data[1])
+        
         elif data[0] == "GAME_START":
             #Game is starting
             #Here we just switch modes or something, I dunno. Im not sure we even need this
@@ -153,6 +152,7 @@ class ClientMode(threading.Thread):
         #our connection_id is extremely important for each client to have
         elif data[0] == "CON_ID":
             self.connection_id = data[1]
+            print "GOT CONNECTION ID %s" % data[1]
         
         #Unique player data. Spawn point and start direction.
         elif data[0] == "INIT_PLAYER_DATA":
@@ -174,12 +174,6 @@ class ClientMode(threading.Thread):
     def send_reply(self, reply_type, reply_data):
         p_reply_data = cPickle.dumps([reply_type, reply_data])
         self.main_socket.send(p_reply_data)
-    
-    
-    def getInitPlayerData(self):
-        while self.init_player_data is None:
-            time.sleep(0.25) #I dont like using sleep here, theres probably a better way to do this with callbacks.
-        return self.init_player_data
     
     def network_cleanup(self):
         #make sure everything has shut down
@@ -203,11 +197,13 @@ class ClientMode(threading.Thread):
 
 
 class SnakePlayer(object):
-    def __init__(self, connection_id, start_grid, start_direction):
+    def __init__(self, connection_id, start_grid, start_direction, start_length):
         self.id = connection_id
         self.current_grid = start_grid
         self.direction = start_direction
         self.alive = False
+        self.snake_grids = [start_grid]
+        self.length = start_length
 
 class GameServer(object):
     def __init__(self, server_mode_ctx, players={}):
@@ -222,7 +218,8 @@ class GameServer(object):
         self.players[connection_id].alive = state_data["alive"]
         self.players[connection_id].current_grid = state_data["current_grid"]
         self.players[connection_id].direction = state_data["direction"]
-    
+        self.players[connection_id].snake_grids = state_data["snake_grids"]
+        self.players[connection_id].length = state_data["length"]
     
     #We do things oddly here just to allow for updating only one item at a time if necessary
     #i.e. just update the alive state without resetting position or direction
@@ -236,11 +233,25 @@ class GameServer(object):
             
         if state_data.has_key("direction") is True and len(state_data["direction"]) > 0:
             self.players[connection_id].direction = state_data["direction"]
+        
+        if state_data.has_key("snake_grids") is True and len(state_data["snake_grids"]) > 0:
+            self.players[connection_id].snake_grids = state_data["snake_grids"]
+        
+        if state_data.has_key("length") is True:
+            self.players[connection_id].length = state_data["length"]
+            
+        #Here we also check to see if there were any collisions or objectives collected
+        #We then update the player's state again with this new information
+        #This all gets sent back to the client later
     
     
     def get_player_state_all(self):
         return_state_data = {}
-        for connection_id, playerobj in self.players.iteritems():
+        #more bullcrap with dictionary changing size during iteration.
+        #Happens if a player quits mid-game. This should fix it....
+        connections = self.players.keys()
+        for connection_id in connections:
+            playerobj = self.players[connection_id]
             #We don't need to keep updating players of a dead player's status so
             #if we encounter a dead player send it out once and then remove the player
             #from self.players.
@@ -248,11 +259,13 @@ class GameServer(object):
             player_data["alive"] = playerobj.alive
             player_data["current_grid"] = playerobj.current_grid
             player_data["direction"] = playerobj.direction
+            player_data["snake_grids"] = playerobj.snake_grids
+            player_data["length"] = playerobj.length
             return_state_data[connection_id] = player_data
             
             #Dead player
             if playerobj.alive == False:
-                self.dead_players[connection_id] = playerobj.copy() #Copying because we would delete both below otherwise. References brah.
+                self.dead_players[connection_id] = deepcopy(playerobj) #Copying because I think we would delete both below otherwise. References brah.
                 del(self.players[connection_id])
             
         return return_state_data
@@ -326,15 +339,20 @@ class ServerMode(threading.Thread):
     
     
     def data_update_callback(self, connection_id, recv_data):
-        print "GOT RECV DATA FROM CONNECTION ID: %s" % connection_id
-        print "RESPONSE_TYPE: %s" % recv_data[0]
-        print "DATA: "
-        print recv_data[1]
         #Here is where the majority of our game-related network logic
         #will go.
         
-        if recv_data[0] == "TEST_CMD":
-            print "GOT TEST COMMAND FROM CONNECTION ID: %s" % connection_id
+        if recv_data[0] == "PLAYER_DATA_UPDATE":
+            self.gameserver.update_player_state(recv_data[1]["connection_id"], recv_data[1])
+        
+        elif recv_data[0] == "":
+            pass
+        elif recv_data[0] == "":
+            pass
+        
+        #if recv_data[0] == "TEST_CMD":
+        #    print "GOT TEST COMMAND FROM CONNECTION ID: %s" % connection_id
+        
         
     
     
@@ -352,6 +370,8 @@ class ServerMode(threading.Thread):
     
     #And this is where everything gets really damn complicated Im sure
     def start_game(self):
+        #Sleeping because something weird is going on and sometimes this command never gets to the clients
+        time.sleep(0.1)
         #Lets send our clients the game-mode data before anything else
         self.broadcast_command(["GAME_MODE_DATA", self.game_mode_params])
         
@@ -361,7 +381,7 @@ class ServerMode(threading.Thread):
         init_player_data_all = {}
         players = {}
         for index, connection_id in enumerate(self.connections.keys()):
-            new_player = SnakePlayer(connection_id, self.SPAWN_POINTS[index][0], self.SPAWN_POINTS[index][1])
+            new_player = SnakePlayer(connection_id, self.SPAWN_POINTS[index][0], self.SPAWN_POINTS[index][1], self.game_mode_params["INIT_SNAKE_SIZE"])
             players[connection_id] = new_player
             #Tell the player the spawn points of everyone
             init_player_data = {}
@@ -371,9 +391,13 @@ class ServerMode(threading.Thread):
             init_player_data["init_snake_size"] = self.game_mode_params["INIT_SNAKE_SIZE"]
             init_player_data["color"] = SNAKE_COLORS[connection_id]
             init_player_data_all[connection_id] = init_player_data
+            #Sleeping because something weird is going on and sometimes this command never gets to the clients
+            time.sleep(0.1)
             #Tell the player their connection_id
             self.send_command(["CON_ID", connection_id], connection_id)
         
+        #Sleeping because something weird is going on and sometimes this command never gets to the clients
+        time.sleep(0.1)
         init_command = ["INIT_PLAYER_DATA", init_player_data_all]
         self.broadcast_command(init_command)
         
@@ -435,7 +459,7 @@ class ServerMode(threading.Thread):
             
             #Send updates to clients
             else:
-                send_cmd = ["GAME_UPDATE", self.get_player_state_all()]
+                send_cmd = ["GAME_UPDATE", self.gameserver.get_player_state_all()]
                 self.broadcast_command(send_cmd)
                 #And of course, switch our mode back
                 cur_mode = "GET"
@@ -629,6 +653,16 @@ class MasterNetworkMode(object):
             else:
                 return None
     
+    def getInitPlayerData(self):
+        while self.client_thread.init_player_data is None:
+            time.sleep(0.25) #I dont like using sleep here, theres probably a better way to do this with callbacks.
+        return self.client_thread.init_player_data
+    
+    
+    #The client's connection_id should be set as long as this is called after getInitPlayerData().
+    def getConnectionID(self):
+        return self.client_thread.connection_id
+        
     def setSnakeReference(self, snake_reference):
         self.client_thread.snake_reference = snake_reference
     

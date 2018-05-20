@@ -37,7 +37,7 @@ from sys import exit as sys_exit
 #Number of players in the game
 MAX_PLAYERS = 2
 #Number of seconds to wait after all players have joined before the game begins
-GAME_START_WAIT = 10
+GAME_START_WAIT = 5
 
 #Your color corresponds to your connection_id
 SNAKE_COLORS = []
@@ -88,8 +88,8 @@ class ClientMode(threading.Thread):
         self.is_connected = True
         #Ok we have a good connection to the server. Lets listen for any data
         while self.quitting == False:
-                data = None
-            #try:
+            data = None
+            try:
                 readable, _, _ = select.select([self.main_socket, self.quit_socket], [], [], 60) #60 second timeout
                 for sock in readable:
                     if sock == self.main_socket:
@@ -105,9 +105,10 @@ class ClientMode(threading.Thread):
                         self.quit_socket.close()
                         self.quitting = True
                         break
-            #except Exception as e:
-            #    print "CM DEBUG: %s" % str(e)
-            #    break
+            except:
+                self.quitting = True
+                break
+            
         #Got the message to quit or the thread died, either way lets quit
         self.quit_thread()
     
@@ -127,10 +128,17 @@ class ClientMode(threading.Thread):
         #print "\n%s - %s:RECEIVED VALID COMMAND: %s" % (time.time(), self.name, data[0])
         
         if data[0] == "GET_NEXT_MOVE":
-            self.send_reply("PLAYER_DATA_UPDATE", self.snake_reference.getOurSnakeData())
+            #Only update if we are still alive
+            netupd = self.snake_reference.getOurSnakeData()
+            if netupd["alive"] is True:
+                self.send_reply("PLAYER_DATA_UPDATE", netupd)
         
         elif data[0] == "GAME_UPDATE":
             self.snake_reference.setAllSnakesData(data[1])
+        
+        elif data[0] == "YOU_DIED":
+            print "WE DIED! Reason: %s" % data[1]
+            self.quit_thread()
         
         elif data[0] == "GAME_START":
             #Game is starting
@@ -138,6 +146,9 @@ class ClientMode(threading.Thread):
             #Although now that I think about it the only other way would be to go by the SERVER_MESSAGE
             #So yeah this is needed, ugh.
             print "GAME ON!!!!!"
+            #Send out the first update manually, this one just sets all the players to alive and nothing else
+            self.snake_reference.setAllPlayersVar("alive", True)
+            
         
         elif data[0] == "GAME_OVER":
             print "Got game over signal, game over man!"
@@ -198,20 +209,118 @@ class ClientMode(threading.Thread):
 
 class SnakePlayer(object):
     def __init__(self, connection_id, start_grid, start_direction, start_length):
-        self.id = connection_id
+        self.connection_id = connection_id
         self.current_grid = start_grid
         self.direction = start_direction
         self.alive = False
         self.snake_grids = [start_grid]
         self.length = start_length
+        self.last_update_tick = 0
 
 class GameServer(object):
     def __init__(self, server_mode_ctx, players={}):
         self.server_mode_ctx = server_mode_ctx
         #Should be a list of SnakePlayer objects
         self.players = players
+        self.objectives = []
         self.dead_players = {}
+        self.current_tick = 0
+        self.cur_mode = "GET"
     
+    def checkForCollisions(self):
+        #Check if alive first
+        #Check if head of snake (next move) is in an occupied block
+        #Check if that occupied block is the head of another snake
+        #   -If yes and that snake has updated, set that other snake to dead too
+        #Set our snake to dead
+        
+        #Figure out all the occupied blocks
+        #Its unfortunate but we have to loop through this data twice
+        #I will think about how not to do that....
+        all_snake_heads = []
+        all_occupied_grids = []
+        for _, snakeobj in self.players.iteritems():
+            all_snake_heads += snakeobj.snake_grids[-1]
+            all_occupied_grids += snakeobj.snake_grids
+            
+        dead_players = []
+        for connection_id, snakeobj in self.players.iteritems():
+            
+            #Check for wall collision
+            if snakeobj.alive == True:
+                next_move = snakeobj.snake_grids[-1]
+                if ((0 <= next_move[0] < self.server_mode_ctx.rows+1) and (0 <= next_move[1] < self.server_mode_ctx.cols+1)) is False:
+                    print "PLAYER %s HIT WALL" % connection_id
+                    snakeobj.alive = False
+                    self.server_mode_ctx.send_command(["YOU_DIED", "HIT A WALL"], snakeobj.connection_id)
+                    
+            
+            #Checking snakeobj.alive again, maybe the wall collision killed out snake
+            #Check for collision with other snakes
+            if snakeobj.alive == True:
+                #check if this snake's head is in an already occupied grid
+                #We filter out our own snake by looking at the grid before the head
+                snake_head = snakeobj.snake_grids[-1]
+                snake_neck = snakeobj.snake_grids[-2]
+                #Get indices where our snake head is. There should be at least one, our actual location.
+                #if there is another, thats another snake and we just ran into it.
+                #So many loops, I really am not fond of this function already
+                for index, ogrid in enumerate(all_occupied_grids):
+                    if ogrid == snake_head:
+                        #Make sure this isn't us
+                        if all_occupied_grids[index-1] != snake_neck:
+                            #Ok so we died.
+                            #We would back up but we cant since we dont have information on the previous tail grid
+                            #So the dead snake is actually one grid shorter than it was before it died.
+                            #Just imagine the snake pancaked against the obstacle ala Wile E. Coyote :P
+                            snakeobj.alive = False
+                            self.server_mode_ctx.send_command(["YOU_DIED", "HIT ANOTHER SNAKE"], snakeobj.connection_id)
+                            
+                            #Remove the head since that would be intersecting the grid we collided with
+                            #Special case, head on collision we will let them intersect, otherwise it looks weird (like we collided with nothing)
+                            if ogrid not in all_snake_heads:
+                                del(snakeobj.snake_grids[-1])
+            else:
+                dead_players.append(connection_id)
+        
+    
+    #This function runs twice per client game tick
+    def halfTick(self):
+        self.current_tick += 1
+        #Now we're actually playing the game
+        #The basic order for each game tick is as follows:
+        #Broadcast command for getting new player state
+        # - NOT DOING THIS YET - Compare data and separate new player information
+        #Check stuffs:
+        #   All players dead? Game over. That kinda stuff
+        #Broadcast command for updating new player state
+        
+        
+        
+        #MAIN GAME LOOP
+        #Yeah I didnt think this was a good idea either, but It does work so yeah....
+        #Modes are GET and SEND, but they could have just as easily been 0 or 1. This is easier to follow.
+        
+        
+        #Get updates from clients
+        if self.cur_mode == "GET":
+            get_cmd = ["GET_NEXT_MOVE"]
+            self.server_mode_ctx.broadcast_command(get_cmd, recv=True)
+            
+            
+            #Lastly switch our mode
+            self.cur_mode = "SEND"
+        
+        #Send updates to clients. This corresponds with the client's game tick.
+        else:
+            #Check for collisions before we send out updates
+            self.checkForCollisions()
+            player_update = self.get_player_state_all()
+            send_cmd = ["GAME_UPDATE", player_update]
+            self.server_mode_ctx.broadcast_command(send_cmd)
+            
+            #And of course, switch our mode back
+            self.cur_mode = "GET"
     
     #This function assumes state_data contains all data required.
     def set_player_state(self, connection_id, state_data):
@@ -284,17 +393,17 @@ class ServerMode(threading.Thread):
         self.game_mode_params = game_mode_params
         self.gameserver = None
         #Eh might as well do this here
-        rows = (self.game_mode_params["WINDOW_SIZE"][0]/self.game_mode_params["GRID_SIDE_SIZE_PX"])-1
-        cols = (self.game_mode_params["WINDOW_SIZE"][1]/self.game_mode_params["GRID_SIDE_SIZE_PX"])-1
+        self.rows = (self.game_mode_params["WINDOW_SIZE"][0]/self.game_mode_params["GRID_SIDE_SIZE_PX"])-1
+        self.cols = (self.game_mode_params["WINDOW_SIZE"][1]/self.game_mode_params["GRID_SIDE_SIZE_PX"])-1
         self.SPAWN_POINTS = []
         self.SPAWN_POINTS.append([(0,0), "right"])          # Top left
-        self.SPAWN_POINTS.append([(rows, cols), "left"])    # Bottom right
-        self.SPAWN_POINTS.append([(0, cols), "right"])      # Bottom left
-        self.SPAWN_POINTS.append([(rows ,0), "left"])       # top right
-        self.SPAWN_POINTS.append([(0, cols/2), "right"])    # Middle left
-        self.SPAWN_POINTS.append([(rows, cols/2), "left"])  # Middle right
-        self.SPAWN_POINTS.append([(rows/2, 0), "right"])    # Middle Top
-        self.SPAWN_POINTS.append([(rows/2, cols), "right"]) # Middle Bottom
+        self.SPAWN_POINTS.append([(self.rows, self.cols), "left"])    # Bottom right
+        self.SPAWN_POINTS.append([(0, self.cols), "right"])      # Bottom left
+        self.SPAWN_POINTS.append([(self.rows ,0), "left"])       # top right
+        self.SPAWN_POINTS.append([(0, self.cols/2), "right"])    # Middle left
+        self.SPAWN_POINTS.append([(self.rows, self.cols/2), "left"])  # Middle right
+        self.SPAWN_POINTS.append([(self.rows/2, 0), "right"])    # Middle Top
+        self.SPAWN_POINTS.append([(self.rows/2, self.cols), "right"]) # Middle Bottom
         
         if isinstance(server_port, basestring):
             try:
@@ -335,13 +444,14 @@ class ServerMode(threading.Thread):
         self.connections[connection_id] = None
         del(self.connections[connection_id])
         #Connection closed, set the associated player to being Dead
-        self.gameserver.update_player_state(connection_id, {"alive": False})
+        try:
+            self.gameserver.update_player_state(connection_id, {"alive": False})
+        except:
+            #Maybe the client was killed by the server, in which case it is already set to not alive
+            pass
     
     
     def data_update_callback(self, connection_id, recv_data):
-        #Here is where the majority of our game-related network logic
-        #will go.
-        
         if recv_data[0] == "PLAYER_DATA_UPDATE":
             self.gameserver.update_player_state(recv_data[1]["connection_id"], recv_data[1])
         
@@ -426,12 +536,7 @@ class ServerMode(threading.Thread):
         #GAME ON!!
         self.broadcast_command(["GAME_START", None])
         
-        
-        #Yeah I didnt think this was a good idea either, but It does work so yeah....
-        #Modes are GET and SEND, but they could have just as easily been 0 or 1. This is easier to follow.
-        cur_mode = "GET"
         while self.quitting is False and game_over is False:
-            #Now we're actually playing the game
             #Prune connections, if all clients have disconnected its game over
             self.check_connections()
             if len(self.connections) == 0:
@@ -439,31 +544,8 @@ class ServerMode(threading.Thread):
                 game_over = True
                 continue
             
-            #The basic order for each game tick is as follows:
-            #Broadcast command for getting new player state
-            #Compare data and separate new player information
-            #Check stuffs:
-            #   All players dead? Game over. That kinda stuff
-            #Broadcast command for updating new player state
-            
-            
-            #MAIN GAME LOOP
-            #Get updates from clients
-            if cur_mode == "GET":
-                get_cmd = ["GET_NEXT_MOVE"]
-                self.broadcast_command(get_cmd, recv=True)
-                
-                
-                #Lastly switch our mode
-                cur_mode = "SEND"
-            
-            #Send updates to clients
-            else:
-                send_cmd = ["GAME_UPDATE", self.gameserver.get_player_state_all()]
-                self.broadcast_command(send_cmd)
-                #And of course, switch our mode back
-                cur_mode = "GET"
-            
+            #Game stuff is inside this function
+            self.gameserver.halfTick()
             #Sleep half the tickrate. I'm sure there is a better way to handle this but
             #basically every other tick we send updated data and the other ticks we get data.
             #So here we also set which mode we are currently in.
@@ -573,7 +655,8 @@ class ServerClientConnection(object):
                 self.quit_thread()
             else:
                 print "\n[%s] SCC_DEBUG: Something went terribly wrong here, Exception was:" % self.connection_id
-                print e.args
+                import traceback
+                traceback.print_exc()
             
     
     def receive_data(self):

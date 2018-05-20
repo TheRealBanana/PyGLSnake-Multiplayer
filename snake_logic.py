@@ -44,11 +44,13 @@ class SnakeManager(object):
         return all_snake_data
     
     #Just get our snake data
+    #This will also cause our snake to move one grid
     def getOurSnakeData(self):
         #Get our next move based on our current direction
         next_move = self.snakes[self.our_connection_id].getMove()
         self.snakes[self.our_connection_id].setNextMove(next_move)
-        return self.snakes[self.our_connection_id].getSnakeState()
+        return_data = self.snakes[self.our_connection_id].getSnakeState()
+        return return_data
 
 class Snake(object):
     def __init__(self, init_player_data):
@@ -104,8 +106,21 @@ class Snake(object):
             del(self.snake_grids[0])
         self.snake_grids.append(next_grid)
         self.current_grid = next_grid
-        
-        
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    '''
+    DEFUNCT CODE BELOW
+    '''
+    
+    
+    
     
     
     

@@ -39,7 +39,10 @@ ELEMENT_TYPES.append([255, 255, 255]) # Type # 1; SNAKE_HEAD
 ELEMENT_TYPES.append([255, 255, 255]) # Type # 2; SNAKE_TAIL
 ELEMENT_TYPES.append([0, 84, 166]) # Type # 3; OBJECTIVE
 ELEMENT_TYPES.append([255, 0, 0]) # Type # 4; DEAD HEAD
-
+#Just for our own snake
+OUR_SNAKE = []
+OUR_SNAKE.append([66, 255, 0]) # Type # 0; SNAKE_HEAD
+OUR_SNAKE.append([40, 150, 0]) # Type # 1; SNAKE_TAIL
 
 #Our snake color will correspond to our connection_id. Will probably only have 6 colors to start with
 #simple list using connection_id as index will suffice
@@ -91,8 +94,14 @@ class Grid(object):
         all_snake_data = self.snake_manager_reference.getAllSnakesData()
         for connection_id, snake_data in all_snake_data.iteritems():
             #Update the element type list with this snake's specific colors
-            ELEMENT_TYPES[1] = snake_data["color"][0]
-            ELEMENT_TYPES[2] = snake_data["color"][1]
+            #Only do this for other snakes, our snake is always fluorescent green.
+            if connection_id != self.snake_manager_reference.our_connection_id:
+                ELEMENT_TYPES[1] = snake_data["color"][0]
+                ELEMENT_TYPES[2] = snake_data["color"][1]
+            else:
+                ELEMENT_TYPES[1] = OUR_SNAKE[0]
+                ELEMENT_TYPES[2] = OUR_SNAKE[1]
+            
             #Now loop through the snake grids and set them
             #Our snake head is always the last item in the list (index -1)
             snake_head = snake_data["snake_grids"].pop(-1)

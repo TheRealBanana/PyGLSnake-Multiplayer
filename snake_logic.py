@@ -38,6 +38,8 @@ class SnakeManager(object):
     
     #Just get our snake data
     def getOurSnakeData(self):
+        #Get our next move based on our current direction
+        self.snakes[self.our_connection_id].setNextMove()
         return self.snakes[self.our_connection_id].getSnakeState()
 
 class Snake(object):
@@ -70,9 +72,9 @@ class Snake(object):
         return return_state_data
     
     #Get the next move for our snake
-    #This function is only used with our players snake
-    #Should probably make our snake its own subclass of this class but meh
-    def getMove(self, direction):
+    #This will not return any data, just update our current snake grids to include our new grid
+    def setNextMove(self):
+        direction=self.direction
         if direction == "down":
             next_grid = (self.current_grid[0], self.current_grid[1]+1)
             
@@ -85,7 +87,12 @@ class Snake(object):
         elif direction == "left":
             next_grid = (self.current_grid[0]-1, self.current_grid[1])
         
-        return next_grid
+        if len(self.snake_grids) >= self.length:
+            del(self.snake_grids[0])
+        self.snake_grids.append(next_grid)
+        self.current_grid = next_grid
+        
+        
     
     
     

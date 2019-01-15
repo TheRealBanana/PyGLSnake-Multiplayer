@@ -1,5 +1,3 @@
-from random import randint
-
 class SnakeManager(object):
     def __init__(self, our_connection_id, init_player_data_all={}):
         self.our_connection_id = our_connection_id
@@ -46,7 +44,7 @@ class SnakeManager(object):
     #Just get our snake data
     #This will also cause our snake to move one grid
     def getOurSnakeData(self):
-        #Get our next move based on our current direction
+        # Get our next move based on our current direction
         next_move = self.snakes[self.our_connection_id].getMove()
         self.snakes[self.our_connection_id].setNextMove(next_move)
         return_data = self.snakes[self.our_connection_id].getSnakeState()

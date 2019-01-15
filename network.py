@@ -44,6 +44,7 @@ MAX_OBJECTIVES = 7
 OBJ_TICK = 20
 
 #Your color corresponds to your connection_id
+# UPDATE CLIENT CODE TO USE ITS OWN CONNECTION_ID INSTEAD OF RELYING ON INIT_PLAYER_DATA!
 SNAKE_COLORS = []
 SNAKE_COLORS.append([(255, 0, 0), (167, 0, 0)])
 SNAKE_COLORS.append([(255, 110, 40), (205, 67, 0)])
@@ -590,7 +591,6 @@ class ServerMode(threading.Thread):
             self.gameserver.halfTick()
             #Sleep half the tickrate. I'm sure there is a better way to handle this but
             #basically every other tick we send updated data and the other ticks we get data.
-            #So here we also set which mode we are currently in.
             time.sleep(self.game_mode_params["TICKRATE_MS"]/2000.0)
         
         self.broadcastCommand(["SERVER_MESSAGE", "GAME OVER MAN!!"])

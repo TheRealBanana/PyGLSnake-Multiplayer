@@ -3,9 +3,9 @@
 from network import ServerMode
 
 params = {}
-params["WINDOW_SIZE"] = (500,500)
+params["WINDOW_SIZE"] = (650,650)
 params["GRID_SIDE_SIZE_PX"] = 20
-params["TICKRATE_MS"] = 200
+params["TICKRATE_MS"] = 600
 params["MATH_PRECISION"] = 5
 params["INIT_SNAKE_SIZE"] = 5
 

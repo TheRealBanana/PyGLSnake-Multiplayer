@@ -17,11 +17,6 @@ WINDOW_SIZE = (500,500)
 GRID_SIDE_SIZE_PX = 20
 TICKRATE_MS = 200
 MATH_PRECISION = 5
-#maximum number of active objective blocks on the grid at one time
-MAX_ACTIVE_OBJS = 7
-#Delay between objectives being added to the grid, in ticks (i.e. number of snake moves between adding new objectives)
-OBJECTIVE_DELAY_TICKS = 10
-#Starting snake size
 INIT_SNAKE_SIZE = 5
 
 #Just makes things look nicer
